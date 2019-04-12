@@ -35,13 +35,15 @@ public class createAccount {
 	
 		driver.findElement(By.id("WSIB_Registration:WSIB_RegistrationScreen:WSIB_RegistrationDV:CreateAccountContactInputSet:LegalName")).sendKeys(gen.nextString());
 		
-		Thread.sleep(1000);
+		Thread.sleep(2000);
 		driver.findElement(By.id("WSIB_Registration:WSIB_RegistrationScreen:WSIB_RegistrationDV:CreateAccountContactInputSet:Phone")).click();
+		Thread.sleep(2000);
 		actionObj.keyDown(Keys.CONTROL)
-		         .sendKeys(Keys.chord("A"));
+		         .sendKeys(Keys.chord("a"))
+		         .keyUp(Keys.CONTROL)
+		         .perform();
 		         
-		Thread.sleep(1000);
-		driver.findElement(By.id("WSIB_Registration:WSIB_RegistrationScreen:WSIB_RegistrationDV:CreateAccountContactInputSet:Phone")).clear();
+		Thread.sleep(4000);
 		driver.findElement(By.id("WSIB_Registration:WSIB_RegistrationScreen:WSIB_RegistrationDV:CreateAccountContactInputSet:Phone")).sendKeys("647-585-5252");
 		
 		
