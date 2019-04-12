@@ -17,7 +17,7 @@ System.setProperty("webdriver.chrome.driver", "C:\\Users\\kangulak\\Desktop\\Gui
 		
 		driver.switchTo().frame("top_frame");
 		
-		//xx to be done updated in the ussssdddd edited from the GIT, now this is from Eclipse
+		//xx to be done updated in the ussssdddd edited from the GIT, now this is from Eclipse new one
 		
 		driver.findElement(By.id("Login:LoginScreen:LoginDV:username")).sendKeys("kangulak");
 		driver.findElement(By.id("Login:LoginScreen:LoginDV:password")).sendKeys("gw");
