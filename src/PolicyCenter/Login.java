@@ -1,15 +1,17 @@
-package Workingmode;
+package PolicyCenter;
 
 import org.openqa.selenium.By;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.chrome.ChromeDriver;
 
-public class CreateAccount {
+public class Login {
 
 	public static void main(String[] args) {
 		// TODO Auto-generated method stub
 		
-System.setProperty("webdriver.chrome.driver", "C:\\Users\\kangulak\\Desktop\\GuidewireTCM\\chromedriver.exe");
+		
+		
+		System.setProperty("webdriver.chrome.driver", "C:\\Users\\kangulak\\Desktop\\GuidewireTCM\\chromedriver.exe");
 		
 		WebDriver driver=new ChromeDriver();
 		driver.manage().window().maximize();
@@ -23,6 +25,10 @@ System.setProperty("webdriver.chrome.driver", "C:\\Users\\kangulak\\Desktop\\Gui
 		driver.findElement(By.id("Login:LoginScreen:LoginDV:password")).sendKeys("gw");
 		driver.findElement(By.xpath("//span[@class='button_link']")).click();
 		
-	}
+		createAccount acc = new createAccount();
+		acc.accountcreate(driver);
+	
+		
+		}
 
 }
