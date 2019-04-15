@@ -10,7 +10,7 @@ import org.openqa.selenium.ie.InternetExplorerDriver;
 public class Login {
 
 	public WebDriver chrome() throws InterruptedException, AWTException {
-		// TODO Auto-generated method stub
+		//removed this comment
 		
 		System.setProperty("webdriver.chrome.driver", "C:\\Users\\kangulak\\Desktop\\GuidewireTCM\\chromedriver.exe");
 		
