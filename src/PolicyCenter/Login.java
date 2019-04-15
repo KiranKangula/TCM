@@ -27,9 +27,17 @@ public class Login {
 		driver.findElement(By.id("Login:LoginScreen:LoginDV:password")).sendKeys("gw");
 		driver.findElement(By.xpath("//span[@class='button_link']")).click();
 		
+		// Calls the code to create account
+		
 		createAccount acc = new createAccount();
 		acc.accountcreate(driver);
-	
+		
+		// Calls the code to create policy
+		createPolicy pol = new createPolicy();
+		pol.policycreate(driver);
+		
+		
+		
 		
 		}
 
