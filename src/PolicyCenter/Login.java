@@ -20,9 +20,9 @@ public class Login {
 		
 				
 		ExcelUtils.setExcelFile(Constant.Path_TestData + Constant.File_TestData,"Sheet1");
-		ExcelUtils.getCellData(2, 2);
-
+		//ExcelUtils.getCellData(2, 2);
 		//driver.get("https://sit2.aces.wsib.on.ca:4447/pc/PolicyCenter.do?");
+		
 		driver.get(ExcelUtils.getCellData(2, 2));
 		
 		driver.switchTo().frame("top_frame");
@@ -46,6 +46,9 @@ public class Login {
 		
 		WebDriver driver=new InternetExplorerDriver();
 		driver.manage().window().maximize();
+		
+		ExcelUtils.setExcelFile(Constant.Path_TestData + Constant.File_TestData,"Sheet1");
+		
 		driver.get(ExcelUtils.getCellData(2, 2));
 		
 		driver.switchTo().frame("top_frame");
