@@ -1,12 +1,10 @@
 package PolicyCenter;
 
-import java.awt.AWTException;
-
 import org.openqa.selenium.WebDriver;
 
 public class policyCreationDriver {
 
-	public static void main(String[] args) throws InterruptedException, AWTException {
+	public static void main(String[] args) throws Exception {
 		// TODO Auto-generated method stub
 
 	
