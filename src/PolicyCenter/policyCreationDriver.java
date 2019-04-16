@@ -11,7 +11,7 @@ public class policyCreationDriver {
 
 	
 		Login log = new Login();
-		WebDriver driver = log.internetexplorer();
+		WebDriver driver = log.chrome();
 		
 		// Calls the code to create account
 		
