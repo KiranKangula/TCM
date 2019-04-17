@@ -56,9 +56,10 @@ throw (e);
 
 public static String getCellData(int RowNum, int ColNum) throws Exception{
 
-try{
+	try{
 
 Cell = ExcelWSheet.getRow(RowNum).getCell(ColNum);
+System.out.println(Cell);
 
 String CellData = Cell.getStringCellValue();
 System.out.println(CellData);
@@ -66,7 +67,7 @@ System.out.println(CellData);
 return CellData;
 
 }catch (Exception e){
-
+System.out.println(e);
 return"";
 
 }

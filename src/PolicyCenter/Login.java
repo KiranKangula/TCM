@@ -21,16 +21,16 @@ public class Login {
 				
 		ExcelUtils.setExcelFile(Constant.Path_TestData + Constant.File_TestData,"Sheet1");
 		//ExcelUtils.getCellData(2, 2);
-		//driver.get("https://sit2.aces.wsib.on.ca:4447/pc/PolicyCenter.do?");
+		driver.get("https://sit2.aces.wsib.on.ca:4447/pc/PolicyCenter.do?");
 		
-		driver.get(ExcelUtils.getCellData(2, 2));
 		
 		driver.switchTo().frame("top_frame");
 		
 		//xx to be done updated in the ussssdddd edited from the GIT, now this is from Eclipse new one
 		
-		driver.findElement(By.id("Login:LoginScreen:LoginDV:username")).sendKeys(ExcelUtils.getCellData(2, 3));
-		driver.findElement(By.id("Login:LoginScreen:LoginDV:password")).sendKeys(ExcelUtils.getCellData(2, 4));
+		
+		driver.findElement(By.id("Login:LoginScreen:LoginDV:username")).sendKeys(ExcelUtils.getCellData(2, 2));
+		driver.findElement(By.id("Login:LoginScreen:LoginDV:password")).sendKeys(ExcelUtils.getCellData(2, 3));
 		driver.findElement(By.xpath("//span[@class='button_link']")).click();
 		return driver;
 		
@@ -49,14 +49,14 @@ public class Login {
 		
 		ExcelUtils.setExcelFile(Constant.Path_TestData + Constant.File_TestData,"Sheet1");
 		
-		driver.get(ExcelUtils.getCellData(2, 2));
+		driver.get("https://sit2.aces.wsib.on.ca:4447/pc/PolicyCenter.do?");
 		
 		driver.switchTo().frame("top_frame");
 		
-		//xx to be done updated in the ussssdddd edited from the GIT, now this is from Eclipse new one
 		
-		driver.findElement(By.id("Login:LoginScreen:LoginDV:username")).sendKeys(ExcelUtils.getCellData(2, 3));
-		driver.findElement(By.id("Login:LoginScreen:LoginDV:password")).sendKeys(ExcelUtils.getCellData(2, 4));
+		
+		driver.findElement(By.id("Login:LoginScreen:LoginDV:username")).sendKeys(ExcelUtils.getCellData(2, 2));
+		driver.findElement(By.id("Login:LoginScreen:LoginDV:password")).sendKeys(ExcelUtils.getCellData(2, 3));
 		driver.findElement(By.xpath("//span[@class='button_link']")).click();
 		return driver;
 		
