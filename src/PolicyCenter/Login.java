@@ -21,7 +21,7 @@ public class Login {
 				
 		ExcelUtils.setExcelFile(Constant.Path_TestData + Constant.File_TestData,"Sheet1");
 		//ExcelUtils.getCellData(2, 2);
-		driver.get("https://sit2.aces.wsib.on.ca:4447/pc/PolicyCenter.do?");
+		driver.get("http://10.48.46.12:38150/pc/PolicyCenter.do");
 		
 		
 		driver.switchTo().frame("top_frame");
