@@ -3,23 +3,21 @@ let
     JiraDomain = "wsib.atlassian.net",
     Email = "your_email@example.com",
     ApiToken = "your_api_token_here",
-    JqlQuery = "filter=11824",
+    JqlQuery = "filter=11824",        // your filter or JQL
+    MaxResults = 100,                 // Jira max per page
 
     // Encode auth (email:token → base64)
-    AuthKey = Binary.ToText(
-        Text.ToBinary(Email & ":" & ApiToken),
-        BinaryEncoding.Base64
-    ),
+    AuthKey = Binary.ToText(Text.ToBinary(Email & ":" & ApiToken), BinaryEncoding.Base64),
 
-    // Function to fetch each page of data (POST request)
+    // Function to fetch a page from Jira
     GetPage = (StartAt as number) =>
         let
-            RequestBody = Text.ToBinary(
-                "{""query"": """ & JqlQuery & """," &
-                """startAt"": " & Number.ToText(StartAt) & "," &
-                """maxResults"": 100," &
-                """fields"": [""summary"", ""priority"", ""assignee"", ""status"", ""issuetype"", ""fixVersions"", ""created"", ""customfield_10020""]}"
-            ),
+            RequestBody = Json.FromValue([
+                query = JqlQuery,
+                startAt = StartAt,
+                maxResults = MaxResults,
+                fields = {"summary","priority","assignee","status","issuetype","fixVersions","created","customfield_10020"}
+            ]),
             Response = Json.Document(
                 Web.Contents(
                     "https://" & JiraDomain & "/rest/api/3/search/jql",
@@ -28,18 +26,18 @@ let
                             #"Authorization" = "Basic " & AuthKey,
                             #"Content-Type" = "application/json"
                         ],
-                        Content = RequestBody
+                        Content = Text.ToBinary(Json.ToText(RequestBody))
                     ]
                 )
             )
         in
             Response,
 
-    // Generate a list of pages until no more issues
+    // Generate pages until no more issues
     Pages = List.Generate(
         () => [StartAt = 0, Response = GetPage(0)],
         each List.Count([Response][issues]) > 0,
-        each [StartAt = [StartAt] + 100, Response = GetPage([StartAt])],
+        each [StartAt = [StartAt] + MaxResults, Response = GetPage([StartAt])],
         each [Response][issues]
     ),
 
@@ -50,10 +48,8 @@ let
     #"Converted to Table" = Table.FromList(CombinedData, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
     #"Expanded Issue" = Table.ExpandRecordColumn(#"Converted to Table", "Column1", {"key","fields"}, {"Jira Id","Fields"}),
 
-    // Expand fields
+    // Expand nested fields
     #"Expanded Fields" = Table.ExpandRecordColumn(#"Expanded Issue", "Fields", {"summary","priority","assignee","status","issuetype","fixVersions","created","customfield_10020"}, {"Summary","Priority","Assignee","Status","IssueType","FixVersions","CreatedDate","Sprint"}),
-
-    // Expand nested objects
     #"Expanded Priority" = Table.ExpandRecordColumn(#"Expanded Fields", "Priority", {"name"}, {"Priority"}),
     #"Expanded Assignee" = Table.ExpandRecordColumn(#"Expanded Priority", "Assignee", {"displayName"}, {"Assignee"}),
     #"Expanded Status" = Table.ExpandRecordColumn(#"Expanded Assignee", "Status", {"name"}, {"Status"}),
@@ -63,7 +59,7 @@ let
     #"Expanded Sprint" = Table.ExpandListColumn(#"Expanded FixVersions2", "Sprint"),
     #"Expanded Sprint2" = Table.ExpandRecordColumn(#"Expanded Sprint", "Sprint", {"name"}, {"Sprint"}),
 
-    // Group back Sprint values if multiple
+    // Group Sprint values if multiple per issue
     #"Grouped Rows" = Table.Group(#"Expanded Sprint2", {"Jira Id", "Issue Type", "Summary", "Priority", "Status", "Release Date", "Assignee", "CreatedDate"}, {
         {"Sprint", each Text.Combine(List.Transform([Sprint], Text.From), ", "), type text}
     })
