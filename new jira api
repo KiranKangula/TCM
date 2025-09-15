@@ -1,0 +1,53 @@
+let
+    // Read the base URL from the named range in the Excel workbook
+    BaseUrlTable = Excel.CurrentWorkbook(){[Name="BaseUrl"]}[Content],
+    BaseUrl = BaseUrlTable{0}[Column1],
+
+    // Function to fetch each page of data
+    GetPage = (PageNumber as number) =>
+        let
+            StartAt = PageNumber * 100,
+            Url = BaseUrl & "&startAt=" & Number.ToText(StartAt),
+            Source = Json.Document(Web.Contents(Url))
+        in
+            Source,
+
+    // Generate a list of page numbers
+    Pages = List.Generate(
+        () => [PageNumber = 0, Continue = true], // Initial state
+        each [Continue], // Condition to continue
+        each [
+            PageNumber = [PageNumber] + 1,
+            Continue = List.Count(GetPage([PageNumber])[issues]) > 0 // Stop if no more issues
+        ],
+        each [PageNumber] // Select the page number
+    ),
+
+    // Retrieve and combine data from all pages
+    CombinedData = List.Combine(List.Transform(Pages, each GetPage(_)[issues])),
+
+    // Convert the combined data into a table
+    #"Converted to Table" = Table.FromList(CombinedData, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+
+    // Expand and process data
+    #"Expanded Column1" = Table.ExpandRecordColumn(#"Converted to Table", "Column1", {"expand", "id", "self", "key", "fields"}, {"Column1.expand", "Column1.id", "Column1.self", "Column1.key", "Column1.fields"}),
+    #"Removed Columns" = Table.RemoveColumns(#"Expanded Column1",{"Column1.self", "Column1.id", "Column1.expand"}),
+    #"Expanded Column1.fields" = Table.ExpandRecordColumn(#"Removed Columns", "Column1.fields", {"fixVersions", "priority", "assignee", "status", "issuetype", "summary", "created", "customfield_10020"}, {"Column1.fields.fixVersions", "Column1.fields.priority", "Column1.fields.assignee", "Column1.fields.status", "Column1.fields.issuetype", "Column1.fields.summary", "Column1.fields.created", "Column1.fields.customfield_10020"}),
+    #"Expanded Column1.fields.fixVersions" = Table.ExpandListColumn(#"Expanded Column1.fields", "Column1.fields.fixVersions"),
+    #"Expanded Column1.fields.fixVersions1" = Table.ExpandRecordColumn(#"Expanded Column1.fields.fixVersions", "Column1.fields.fixVersions", {"name"}, {"Column1.fields.fixVersions.name"}),
+    #"Expanded Column1.fields.priority" = Table.ExpandRecordColumn(#"Expanded Column1.fields.fixVersions1", "Column1.fields.priority", {"name"}, {"Column1.fields.priority.name"}),
+    #"Expanded Column1.fields.assignee" = Table.ExpandRecordColumn(#"Expanded Column1.fields.priority", "Column1.fields.assignee", {"displayName"}, {"Column1.fields.assignee.displayName"}),
+    #"Expanded Column1.fields.status" = Table.ExpandRecordColumn(#"Expanded Column1.fields.assignee", "Column1.fields.status", {"name"}, {"Column1.fields.status.name"}),
+    #"Expanded Column1.fields.issuetype" = Table.ExpandRecordColumn(#"Expanded Column1.fields.status", "Column1.fields.issuetype", {"name"}, {"Column1.fields.issuetype.name"}),
+    #"Expanded Column1.fields.customfield_10020" = Table.ExpandListColumn(#"Expanded Column1.fields.issuetype", "Column1.fields.customfield_10020"),
+    #"Expanded Column1.fields.customfield_10020.name" = Table.ExpandRecordColumn(#"Expanded Column1.fields.customfield_10020", "Column1.fields.customfield_10020", {"name"}, {"Column1.fields.customfield_10020.name"}),
+    #"Renamed Columns" = Table.RenameColumns(#"Expanded Column1.fields.customfield_10020.name",{{"Column1.key", "Jira Id"}}),
+    #"Reordered Columns" = Table.ReorderColumns(#"Renamed Columns",{"Jira Id", "Column1.fields.issuetype.name", "Column1.fields.summary", "Column1.fields.priority.name", "Column1.fields.status.name", "Column1.fields.fixVersions.name", "Column1.fields.assignee.displayName", "Column1.fields.created", "Column1.fields.customfield_10020.name"}),
+    #"Renamed Columns1" = Table.RenameColumns(#"Reordered Columns",{{"Column1.fields.issuetype.name", "Issue Type"}, {"Column1.fields.summary", "Summary"}, {"Column1.fields.priority.name", "Priority"}, {"Column1.fields.status.name", "Status"}, {"Column1.fields.fixVersions.name", "Release Date"}, {"Column1.fields.assignee.displayName", "Assignee"}, {"Column1.fields.created", "CreatedDate"}, {"Column1.fields.customfield_10020.name", "Sprint"}}),
+
+    // Group by Jira Id and concatenate Sprint values
+    #"Grouped Rows" = Table.Group(#"Renamed Columns1", {"Jira Id", "Issue Type", "Summary", "Priority", "Status", "Release Date", "Assignee", "CreatedDate"}, {
+        {"Sprint", each Text.Combine(List.Transform([Sprint], Text.From), ", "), type text}
+    })
+in
+    #"Grouped Rows"
