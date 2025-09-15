@@ -26,7 +26,7 @@ let
                             #"Authorization" = "Basic " & AuthKey,
                             #"Content-Type" = "application/json"
                         ],
-                        Content = Text.ToBinary(Json.ToText(RequestBody))
+                        Content = Text.ToBinary(RequestBody)
                     ]
                 )
             )
@@ -50,6 +50,8 @@ let
 
     // Expand nested fields
     #"Expanded Fields" = Table.ExpandRecordColumn(#"Expanded Issue", "Fields", {"summary","priority","assignee","status","issuetype","fixVersions","created","customfield_10020"}, {"Summary","Priority","Assignee","Status","IssueType","FixVersions","CreatedDate","Sprint"}),
+
+    // Expand nested objects
     #"Expanded Priority" = Table.ExpandRecordColumn(#"Expanded Fields", "Priority", {"name"}, {"Priority"}),
     #"Expanded Assignee" = Table.ExpandRecordColumn(#"Expanded Priority", "Assignee", {"displayName"}, {"Assignee"}),
     #"Expanded Status" = Table.ExpandRecordColumn(#"Expanded Assignee", "Status", {"name"}, {"Status"}),
