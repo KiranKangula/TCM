@@ -3,8 +3,8 @@ let
     JiraDomain = "wsib.atlassian.net",
     Email = "your_email@example.com",
     ApiToken = "your_api_token_here",
-    JqlQuery = "filter=11824",        // your filter or JQL
-    MaxResults = 100,                 // Jira max per page
+    JqlQuery = "filter=11824",
+    MaxResults = 100,
 
     // Encode auth (email:token → base64)
     AuthKey = Binary.ToText(Text.ToBinary(Email & ":" & ApiToken), BinaryEncoding.Base64),
@@ -12,12 +12,16 @@ let
     // Function to fetch a page from Jira
     GetPage = (StartAt as number) =>
         let
-            RequestBody = Json.FromValue([
-                query = JqlQuery,
-                startAt = StartAt,
-                maxResults = MaxResults,
-                fields = {"summary","priority","assignee","status","issuetype","fixVersions","created","customfield_10020"}
-            ]),
+            // Build JSON body as plain text
+            RequestBody = 
+                "{" &
+                """query"": """ & JqlQuery & """," &
+                """startAt"": " & Number.ToText(StartAt) & "," &
+                """maxResults"": " & Number.ToText(MaxResults) & "," &
+                """fields"": [""summary"",""priority"",""assignee"",""status"",""issuetype"",""fixVersions"",""created"",""customfield_10020""]" &
+                "}",
+
+            // POST to Jira API
             Response = Json.Document(
                 Web.Contents(
                     "https://" & JiraDomain & "/rest/api/3/search/jql",
