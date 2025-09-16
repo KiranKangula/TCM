@@ -1,4 +1,1 @@
-Expression.Error: We cannot convert a value of type Binary to type Text.
-Details:
-    Value=[Binary]
-    Type=[Type]
+https://wsib.atlassian.net/rest/api/3/search/jql?jql=filter=11824&fields=key,issuetype,summary,priority,status,fixVersions,assignee,created,customfield_10020&maxResults=100
