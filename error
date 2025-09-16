@@ -1,1 +1,2 @@
-https://wsib.atlassian.net/rest/api/3/search/jql?jql=filter=11824&fields=key,issuetype,summary,priority,status,fixVersions,assignee,created,customfield_10020&maxResults=100
+https://wsib.atlassian.net/rest/api/3/search/jql?jql=filter=11958&fields=work,assignee,reporter,priority,status,resolution,created,updated&maxResults=100
+https://wsib.atlassian.net/rest/api/3/search/jql?jql=filter=11858&fields=work,assignee,reporter,priority,status,resolution,created,updated&maxResults=100
