@@ -12,7 +12,7 @@ let
         #"Accept" = "application/json"
     ],
 
-    // 3. Function to fetch a page
+  // 3. Function to fetch a page (with safe pageToken encoding)
     GetPage = (Token as nullable text) =>
         let
             Url = if Token = null then BaseUrl else BaseUrl & "&pageToken=" & Uri.EscapeDataString(Token),
@@ -20,7 +20,7 @@ let
         in
             Source,
 
-    // 4. Sequentially fetch pages
+    // 4. Fetch all pages sequentially
     AllPages = List.Generate(
         () => [Response = GetPage(null), Token = null, Continue = true],
         each [Continue],
@@ -32,37 +32,38 @@ let
         each [Response]
     ),
 
-    // 5. Combine all issues
+    // 5. Combine issues from all pages
     AllIssues = List.Combine(List.Transform(AllPages, each [issues])),
 
-    // 6. Convert to table and expand
+    // 6. Convert to table and expand main fields
     IssuesTable = Table.FromList(AllIssues, Splitter.SplitByNothing(), {"Record"}),
     Expanded = Table.ExpandRecordColumn(IssuesTable, "Record", {"id","key","fields"}),
 
-    // 7. Expand fields safely
-    FieldsExpanded = Table.ExpandRecordColumn(Expanded, "fields", {"issuetype","summary","priority","status","fixVersions","assignee","created","customfield_10020"}, {"issuetype","summary","priority","status","fixVersions","assignee","created","customfield_10020"}),
+    FieldsExpanded = Table.ExpandRecordColumn(Expanded, "fields", 
+        {"issuetype","summary","priority","status","fixVersions","assignee","created","customfield_10020"}, 
+        {"issuetype","summary","priority","status","fixVersions","assignee","created","customfield_10020"}),
 
-    // 8. Expand nested fields
+    // 7. Expand nested fields safely
     ExpandIssueType = Table.ExpandRecordColumn(FieldsExpanded, "issuetype", {"name"}, {"Issue Type"}),
     ExpandPriority = Table.ExpandRecordColumn(ExpandIssueType, "priority", {"name"}, {"Priority"}),
     ExpandStatus = Table.ExpandRecordColumn(ExpandPriority, "status", {"name"}, {"Status"}),
     ExpandAssignee = Table.ExpandRecordColumn(ExpandStatus, "assignee", {"displayName"}, {"Assignee"}),
 
-    // 9. Expand lists safely
-    ExpandFixVersions = Table.TransformColumns(ExpandAssignee, {"fixVersions", each if _ = null then {} else _, type list}),
-    ExpandFixVersions1 = Table.ExpandListColumn(ExpandFixVersions, "fixVersions"),
-    ExpandFixVersions2 = Table.ExpandRecordColumn(ExpandFixVersions1, "fixVersions", {"name"}, {"Release Date"}),
+    // 8. Handle empty lists safely
+    FixVersionsSafe = Table.TransformColumns(ExpandAssignee, {"fixVersions", each if _ = null then {} else _, type list}),
+    FixVersionsExpanded = Table.ExpandListColumn(FixVersionsSafe, "fixVersions"),
+    FixVersionsExpanded1 = Table.ExpandRecordColumn(FixVersionsExpanded, "fixVersions", {"name"}, {"Release Date"}),
 
-    ExpandCustomfield = Table.TransformColumns(ExpandFixVersions2, {"customfield_10020", each if _ = null then {} else _, type list}),
-    ExpandCustomfield1 = Table.ExpandListColumn(ExpandCustomfield, "customfield_10020"),
-    ExpandCustomfield2 = Table.ExpandRecordColumn(ExpandCustomfield1, "customfield_10020", {"name"}, {"Sprint"}),
+    CustomfieldSafe = Table.TransformColumns(FixVersionsExpanded1, {"customfield_10020", each if _ = null then {} else _, type list}),
+    CustomfieldExpanded = Table.ExpandListColumn(CustomfieldSafe, "customfield_10020"),
+    CustomfieldExpanded1 = Table.ExpandRecordColumn(CustomfieldExpanded, "customfield_10020", {"name"}, {"Sprint"}),
 
-    // 10. Rename columns
-    Renamed = Table.RenameColumns(ExpandCustomfield2, {{"key","Jira Id"},{"summary","Summary"},{"created","CreatedDate"}}),
+    // 9. Rename columns
+    Renamed = Table.RenameColumns(CustomfieldExpanded1, {{"key","Jira Id"},{"summary","Summary"},{"created","CreatedDate"}}),
 
-    // 11. Group sprints (concatenate)
-    Grouped = Table.Group(Renamed, {"Jira Id","Issue Type","Summary","Priority","Status","Release Date","Assignee","CreatedDate"}, {
-        {"Sprint", each Text.Combine(List.Transform([Sprint], Text.From), ", "), type text}
-    })
+    // 10. Group sprints safely
+    Grouped = Table.Group(Renamed, {"Jira Id","Issue Type","Summary","Priority","Status","Release Date","Assignee","CreatedDate"}, 
+        {{"Sprint", each if List.Count([Sprint]) = 0 then "" else Text.Combine(List.Transform([Sprint], Text.From), ", "), type text}}
+    )
 in
     Grouped
