@@ -1,86 +1,96 @@
 let
-    // Read the base URL from Excel named range
+    // 1. Read the base URL from Excel named range and ensure maxResults=1000
     BaseUrlTable = Excel.CurrentWorkbook(){[Name="BaseUrl"]}[Content],
-    BaseUrl = BaseUrlTable{0}[Column1],
+    RawUrl      = BaseUrlTable{0}[Column1],
+    // If the URL already has maxResults, replace it; otherwise append maxResults=1000
+    BaseUrl     = if Text.Contains(RawUrl, "maxResults=") 
+                  then Text.Replace(RawUrl, "maxResults=" & Text.Middle(RawUrl, Text.PositionOf(RawUrl, "maxResults=") + 11, 3), "maxResults=200")
+                  else RawUrl & "&maxResults=200"
+                  & "&orderBy=key ASC",
 
-    // Your Jira credentials
-    JiraEmail = "kiran_kangula@wsib.on.ca",
+    // 2. Jira credentials
+    JiraEmail    = "kiran_kangula@wsib.on.ca",
     JiraAPIToken = "ATATT3xFfGF0l4Ia0FIYVr8VC-JA8nIrP9SbUEpIRrH76MON2wzYEaWeqSU4dw2GLHoOSYRaNIq1z8aWJVucXZl3PcqopMimIbc5yFVYs-0UW6sE1tcpWs8dPJ_FXD4yColnUJ2M10us-ngRgnoiZRbvSTbePPFs2mdg4MGcmSwGB1uCMuD52jA=58DAD87F",
-    AuthKey = Binary.ToText(Text.ToBinary(JiraEmail & ":" & JiraAPIToken), BinaryEncoding.Base64),
-    
-    Headers = [
+    AuthKey      = Binary.ToText(Text.ToBinary(JiraEmail & ":" & JiraAPIToken), BinaryEncoding.Base64),
+    Headers      = [
         #"Authorization" = "Basic " & AuthKey,
-        #"Accept" = "application/json"
+        #"Accept"        = "application/json"
     ],
 
-    // Fixed pagination function that works with new JIRA API v3 structure
+    // 3. Pagination function using v3 API structure
     GetPage = (Token as nullable text) =>
         let
-            // Build URL with nextPageToken parameter
-            Url = if Token = null then 
-                BaseUrl 
-            else 
-                BaseUrl & "&nextPageToken=" & Uri.EscapeDataString(Token),
-                
-            Source = Json.Document(
+            Url      = if Token = null then BaseUrl else BaseUrl & "&nextPageToken=" & Uri.EscapeDataString(Token),
+            Response = Json.Document(
                 Web.Contents(Url, [
                     Headers = Headers,
-                    Timeout = #duration(0, 0, 5, 0)  // 5 minute timeout
+                    Timeout = #duration(0, 0, 5, 0)  // 5-minute timeout
                 ])
             )
         in
-            Source,
+            Response,
 
-    // Simplified pagination using the correct API structure
+    // 4. Retrieve all pages
     AllPages = List.Generate(
-        () => [
-            Response = GetPage(null), 
-            Continue = true
-        ],
+        () => [Resp = GetPage(null), Continue = true],
         each [Continue],
         each [
-            NextToken = try [Response][nextPageToken] otherwise null,
-            IsLast = try [Response][isLast] otherwise true,
-            Response = if IsLast = false and NextToken <> null then 
-                GetPage(NextToken) 
-            else 
-                null,
-            Continue = Response <> null
+            NextToken = try [Resp][nextPageToken] otherwise null,
+            IsLast    = try [Resp][isLast] otherwise true,
+            Resp      = if IsLast = false and NextToken <> null then GetPage(NextToken) else null,
+            Continue  = Resp <> null
         ],
-        each [Response]
+        each [Resp]
     ),
 
-    // Extract issues from all pages
-    AllIssues = List.Combine(
-        List.Transform(
-            List.RemoveNulls(AllPages), 
-            each [issues]
-        )
-    ),
-    
-    // Convert to table
+    // 5. Combine all issues
+    AllIssues = List.Combine(List.Transform(List.RemoveNulls(AllPages), each [issues])),
+
+    // 6. Convert to table and expand core records
     IssuesTable = Table.FromList(AllIssues, Splitter.SplitByNothing(), {"Record"}),
-    
-    // Basic expansion
-    Expanded = Table.ExpandRecordColumn(IssuesTable, "Record", {"key", "fields"}),
-    
-    // Expand fields - only essential ones first
-    FieldsExpanded = Table.ExpandRecordColumn(Expanded, "fields", 
-        {"issuetype", "summary", "priority", "status", "assignee", "created"}, 
-        {"issuetype", "summary", "priority", "status", "assignee", "created"}),
-    
-    // Expand nested simple fields
-    IssueTypeExpanded = Table.ExpandRecordColumn(FieldsExpanded, "issuetype", {"name"}, {"Issue Type"}),
-    PriorityExpanded = Table.ExpandRecordColumn(IssueTypeExpanded, "priority", {"name"}, {"Priority"}),
-    StatusExpanded = Table.ExpandRecordColumn(PriorityExpanded, "status", {"name"}, {"Status"}),
-    AssigneeExpanded = Table.ExpandRecordColumn(StatusExpanded, "assignee", {"displayName"}, {"Assignee"}),
-    
-    // Rename columns
-    Final = Table.RenameColumns(AssigneeExpanded, {
-        {"key", "Jira Id"},
-        {"summary", "Summary"},
-        {"created", "CreatedDate"}
-    })
+    Expanded1   = Table.ExpandRecordColumn(IssuesTable, "Record", {"key","id","fields"}),
+    Fields1     = Table.ExpandRecordColumn(Expanded1, "fields",
+        {"issuetype","summary","priority","status","fixVersions","assignee","created","customfield_10020"},
+        {"issuetype","summary","priority","status","fixVersions","assignee","created","Sprint"}
+    ),
 
+    // 7. Expand single-value fields
+    Ex1 = Table.ExpandRecordColumn(Fields1, "issuetype", {"name"}, {"Issue Type"}),
+    Ex2 = Table.ExpandRecordColumn(Ex1, "priority", {"name"}, {"Priority"}),
+    Ex3 = Table.ExpandRecordColumn(Ex2, "status", {"name"}, {"Status"}),
+    Ex4 = Table.ExpandRecordColumn(Ex3, "assignee", {"displayName"}, {"Assignee"}),
+
+    // 8. Handle multi-value lists by concatenating
+    WithFixVersions = Table.TransformColumns(Ex4, {
+        "fixVersions",
+        each if _ = null or List.Count(_) = 0 then "" else Text.Combine(List.Transform(_, each [name]), ", "),
+        type text
+    }),
+    WithSprints = Table.TransformColumns(WithFixVersions, {
+        "Sprint",
+        each if _ = null or List.Count(_) = 0 then "" else Text.Combine(List.Transform(_, each [name]), ", "),
+        type text
+    }),
+
+    // 9. Rename and select final columns
+    Renamed = Table.RenameColumns(WithSprints, {
+        {"key", "Jira Id"},
+        {"id", "Issue Internal Id"},
+        {"summary", "Summary"},
+        {"created", "CreatedDate"},
+        {"fixVersions", "Fix Versions"}
+    }),
+    Final = Table.SelectColumns(Renamed, {
+        "Jira Id",
+        "Issue Internal Id",
+        "Issue Type",
+        "Summary",
+        "Priority",
+        "Status",
+        "Fix Versions",
+        "Sprint",
+        "Assignee",
+        "CreatedDate"
+    })
 in
     Final
