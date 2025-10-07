@@ -5,65 +5,82 @@ let
 
     // Your Jira credentials
     JiraEmail = "kiran_kangula@wsib.on.ca",
-    JiraAPIToken = "ATATT3xFfGF0-JbIzAe00uiDRiCKqLklmhXeFbJ1-WWm0o5p5ox8_HgABGaDbfw7OZtpUOXEXOJuwi0BRqq4YMx2p0jnsw55c2DGJ4oN1IqeQ2wtzlcS084RGNkcOGmQfa_B6HMTpShv35I_6pfdW9ug3uYhMP83hHsSuGIf32jnyFVYgkFoqLU=FDA1B9D4",
+    JiraAPIToken = "ATATT3xFfGF0l4Ia0FIYVr8VC-JA8nIrP9SbUEpIRrH76MON2wzYEaWeqSU4dw2GLHoOSYRaNIq1z8aWJVucXZl3PcqopMimIbc5yFVYs-0UW6sE1tcpWs8dPJ_FXD4yColnUJ2M10us-ngRgnoiZRbvSTbePPFs2mdg4MGcmSwGB1uCMuD52jA=58DAD87F",
     AuthKey = Binary.ToText(Text.ToBinary(JiraEmail & ":" & JiraAPIToken), BinaryEncoding.Base64),
+    
     Headers = [
         #"Authorization" = "Basic " & AuthKey,
         #"Accept" = "application/json"
     ],
 
-  // 3. Function to fetch a page (with safe pageToken encoding)
+    // Fixed pagination function that works with new JIRA API v3 structure
     GetPage = (Token as nullable text) =>
         let
-            Url = if Token = null then BaseUrl else BaseUrl & "&pageToken=" & Uri.EscapeDataString(Token),
-            Source = Json.Document(Web.Contents(Url, [Headers=Headers]))
+            // Build URL with nextPageToken parameter
+            Url = if Token = null then 
+                BaseUrl 
+            else 
+                BaseUrl & "&nextPageToken=" & Uri.EscapeDataString(Token),
+                
+            Source = Json.Document(
+                Web.Contents(Url, [
+                    Headers = Headers,
+                    Timeout = #duration(0, 0, 5, 0)  // 5 minute timeout
+                ])
+            )
         in
             Source,
 
-    // 4. Fetch all pages sequentially
+    // Simplified pagination using the correct API structure
     AllPages = List.Generate(
-        () => [Response = GetPage(null), Token = null, Continue = true],
+        () => [
+            Response = GetPage(null), 
+            Continue = true
+        ],
         each [Continue],
         each [
-            Token = try [Response][nextPageToken] otherwise null,
-            Response = if Token <> null then GetPage(Token) else null,
-            Continue = Response <> null and Record.HasFields(Response, "issues") and List.Count(Response[issues]) > 0
+            NextToken = try [Response][nextPageToken] otherwise null,
+            IsLast = try [Response][isLast] otherwise true,
+            Response = if IsLast = false and NextToken <> null then 
+                GetPage(NextToken) 
+            else 
+                null,
+            Continue = Response <> null
         ],
         each [Response]
     ),
 
-    // 5. Combine issues from all pages
-    AllIssues = List.Combine(List.Transform(AllPages, each [issues])),
-
-    // 6. Convert to table and expand main fields
+    // Extract issues from all pages
+    AllIssues = List.Combine(
+        List.Transform(
+            List.RemoveNulls(AllPages), 
+            each [issues]
+        )
+    ),
+    
+    // Convert to table
     IssuesTable = Table.FromList(AllIssues, Splitter.SplitByNothing(), {"Record"}),
-    Expanded = Table.ExpandRecordColumn(IssuesTable, "Record", {"id","key","fields"}),
-
+    
+    // Basic expansion
+    Expanded = Table.ExpandRecordColumn(IssuesTable, "Record", {"key", "fields"}),
+    
+    // Expand fields - only essential ones first
     FieldsExpanded = Table.ExpandRecordColumn(Expanded, "fields", 
-        {"issuetype","summary","priority","status","fixVersions","assignee","created","customfield_10020"}, 
-        {"issuetype","summary","priority","status","fixVersions","assignee","created","customfield_10020"}),
+        {"issuetype", "summary", "priority", "status", "assignee", "created"}, 
+        {"issuetype", "summary", "priority", "status", "assignee", "created"}),
+    
+    // Expand nested simple fields
+    IssueTypeExpanded = Table.ExpandRecordColumn(FieldsExpanded, "issuetype", {"name"}, {"Issue Type"}),
+    PriorityExpanded = Table.ExpandRecordColumn(IssueTypeExpanded, "priority", {"name"}, {"Priority"}),
+    StatusExpanded = Table.ExpandRecordColumn(PriorityExpanded, "status", {"name"}, {"Status"}),
+    AssigneeExpanded = Table.ExpandRecordColumn(StatusExpanded, "assignee", {"displayName"}, {"Assignee"}),
+    
+    // Rename columns
+    Final = Table.RenameColumns(AssigneeExpanded, {
+        {"key", "Jira Id"},
+        {"summary", "Summary"},
+        {"created", "CreatedDate"}
+    })
 
-    // 7. Expand nested fields safely
-    ExpandIssueType = Table.ExpandRecordColumn(FieldsExpanded, "issuetype", {"name"}, {"Issue Type"}),
-    ExpandPriority = Table.ExpandRecordColumn(ExpandIssueType, "priority", {"name"}, {"Priority"}),
-    ExpandStatus = Table.ExpandRecordColumn(ExpandPriority, "status", {"name"}, {"Status"}),
-    ExpandAssignee = Table.ExpandRecordColumn(ExpandStatus, "assignee", {"displayName"}, {"Assignee"}),
-
-    // 8. Handle empty lists safely
-    FixVersionsSafe = Table.TransformColumns(ExpandAssignee, {"fixVersions", each if _ = null then {} else _, type list}),
-    FixVersionsExpanded = Table.ExpandListColumn(FixVersionsSafe, "fixVersions"),
-    FixVersionsExpanded1 = Table.ExpandRecordColumn(FixVersionsExpanded, "fixVersions", {"name"}, {"Release Date"}),
-
-    CustomfieldSafe = Table.TransformColumns(FixVersionsExpanded1, {"customfield_10020", each if _ = null then {} else _, type list}),
-    CustomfieldExpanded = Table.ExpandListColumn(CustomfieldSafe, "customfield_10020"),
-    CustomfieldExpanded1 = Table.ExpandRecordColumn(CustomfieldExpanded, "customfield_10020", {"name"}, {"Sprint"}),
-
-    // 9. Rename columns
-    Renamed = Table.RenameColumns(CustomfieldExpanded1, {{"key","Jira Id"},{"summary","Summary"},{"created","CreatedDate"}}),
-
-    // 10. Group sprints safely
-    Grouped = Table.Group(Renamed, {"Jira Id","Issue Type","Summary","Priority","Status","Release Date","Assignee","CreatedDate"}, 
-        {{"Sprint", each if List.Count([Sprint]) = 0 then "" else Text.Combine(List.Transform([Sprint], Text.From), ", "), type text}}
-    )
 in
-    Grouped
+    Final
