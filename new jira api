@@ -4,7 +4,7 @@ let
 
     // 2. Credentials
     JiraEmail    = "kiran_kangula@wsib.on.ca",
-    JiraToken    = "ATATT3xFfGF0SOuiaeL9OieMi5KVLgVnuRpz69ADWfFhI7CiLCeOaCWg0K4I-pxPnJNqNwutzk488J47SL6FiaV4coYzVzb5hLzfcntBnEn-wTCEPvSAUHiMYDB5l8aS2e2wiIOZo3JCPDhz-19INw0LZSt0kHKgfRf2FoIOUtTLAKRnE9NtKD8=3CC081D6",
+    JiraToken    = "ATATT3xFfGF0aKNmy26Ak0As7VVqbTuWEdGdvHLqH0-ihxjiS-sNx5WiPgCL2mLczaSSnOMf-kw7EFDWoIEeAIHloXfhTcqq9sh_rMHTnXTRPoLL4hFaUf78YOYcn2In6IXYD9j8gGFPTcIUwG8hbeQyqkwJoySdOXIeHkdgpumMOJgDJ9kBCGI=145B4396",
     AuthKey      = "Basic " & Binary.ToText(Text.ToBinary(JiraEmail & ":" & JiraToken), BinaryEncoding.Base64),
     Headers      = [ Authorization = AuthKey, Accept = "application/json" ],
 
@@ -16,18 +16,15 @@ let
         in
             Response,
 
-    // 4. Fixed pagination logic - properly handle termination
+    // 4. Generate list of pages
     Pages = List.Generate(
-        ()=> [
-            CurrentPage = GetPage(null), 
-            Continue = true
-        ],
+        ()=> [CurrentPage = GetPage(null), Continue = true],
         each [Continue],
         each [
-            NextToken = try [CurrentPage][nextPageToken] otherwise null,
-            IsLast = try [CurrentPage][isLast] otherwise true,
+            NextToken   = try [CurrentPage][nextPageToken] otherwise null,
+            IsLast      = try [CurrentPage][isLast] otherwise true,
             CurrentPage = if IsLast = false and NextToken <> null then GetPage(NextToken) else null,
-            Continue = CurrentPage <> null
+            Continue    = CurrentPage <> null
         ],
         each [CurrentPage]
     ),
@@ -37,48 +34,56 @@ let
     AllIssues = List.Combine(List.Transform(ValidPages, each [issues])),
 
     // 6. Convert to table and expand
-    IssueTbl    = Table.FromList(AllIssues, Splitter.SplitByNothing(), {"Issue"}),
-    Exp1        = Table.ExpandRecordColumn(IssueTbl, "Issue", {"key","id","fields"}, {"Jira Id","Issue Internal Id","Fields"}),
-    Exp2        = Table.ExpandRecordColumn(Exp1, "Fields",
-                      {"issuetype","summary","priority","status","fixVersions","assignee","created","customfield_10020"},
-                      {"IssueTypeRec","Summary","PriorityRec","StatusRec","FixVersionsRec","AssigneeRec","CreatedDate","SprintRec"}),
+    IssueTbl = Table.FromList(AllIssues, Splitter.SplitByNothing(), {"Issue"}),
+    Exp1 = Table.ExpandRecordColumn(IssueTbl, "Issue", {"key","id","fields"}, {"Jira Id","Issue Internal Id","Fields"}),
+    Exp2 = Table.ExpandRecordColumn(
+        Exp1,
+        "Fields",
+        {"issuetype","summary","priority","status","fixVersions","assignee","created","customfield_10020"},
+        {"IssueTypeRec","Summary","PriorityRec","StatusRec","FixVersionsRec","AssigneeRec","CreatedDate","SprintList"}
+    ),
 
     // 7. Expand single-value nested records
-    ExpType     = Table.ExpandRecordColumn(Exp2, "IssueTypeRec", {"name"}, {"Issue Type"}),
-    ExpPrio     = Table.ExpandRecordColumn(ExpType, "PriorityRec", {"name"}, {"Priority"}),
-    ExpStat     = Table.ExpandRecordColumn(ExpPrio, "StatusRec",   {"name"}, {"Status"}),
-    ExpAsgn     = Table.ExpandRecordColumn(ExpStat, "AssigneeRec", {"displayName"}, {"Assignee"}),
+    ExpType = Table.ExpandRecordColumn(Exp2, "IssueTypeRec", {"name"}, {"Issue Type"}),
+    ExpPrio = Table.ExpandRecordColumn(ExpType, "PriorityRec", {"name"}, {"Priority"}),
+    ExpStat = Table.ExpandRecordColumn(ExpPrio, "StatusRec",   {"name"}, {"Status"}),
+    ExpAsgn = Table.ExpandRecordColumn(ExpStat, "AssigneeRec", {"displayName"}, {"Assignee"}),
 
-    // 8. Convert lists to comma-separated text
-    WithFix     = Table.TransformColumns(ExpAsgn, {
-                    "FixVersionsRec",
-                    each if _ = null or List.Count(_) = 0 then "" else Text.Combine(List.Transform(_, each [name]), ", "),
-                    type text
-                 }),
-    WithSprint  = Table.TransformColumns(WithFix, {
-                    "SprintRec",
-                    each if _ = null or List.Count(_) = 0 then "" else Text.Combine(List.Transform(_, each [name]), ", "),
-                    type text
-                 }),
+    // 8. Convert FixVersions list to comma-separated text
+    WithFix = Table.TransformColumns(ExpAsgn, {
+        "FixVersionsRec",
+        each if _ = null or List.Count(_) = 0 then "" else Text.Combine(List.Transform(_, each [name]), ", "),
+        type text
+    }),
 
-    // 9. Rename and select columns
-    Renamed     = Table.RenameColumns(WithSprint, {
-                    {"FixVersionsRec","Fix Versions"},
-                    {"SprintRec","Sprint"}
-                 }),
-    Final       = Table.SelectColumns(Renamed, {
-                    "Jira Id",
-                    "Issue Internal Id",
-                    "Issue Type",
-                    "Summary",
-                    "Priority",
-                    "Status",
-                    "Fix Versions",
-                    "Sprint",
-                    "Assignee",
-                    "CreatedDate"
-                 }),
-    #"Removed Columns" = Table.RemoveColumns(Final,{"Issue Internal Id"}),
-    #"Reordered Columns" = Table.ReorderColumns(#"Removed Columns",{"Jira Id", "Issue Type", "Summary", "Priority", "Status", "Fix Versions", "Assignee", "CreatedDate", "Sprint"})
+    // 9. Extract latest sprint by highest id
+    WithSprint = Table.AddColumn(WithFix, "Sprint", each 
+        let
+            sprints = [SprintList]?,
+            nonNull = if sprints = null then {} else sprints,
+            sorted  = List.Sort(nonNull, (a, b) => if a[id] > b[id] then -1 else if a[id] < b[id] then 1 else 0),
+            latest  = if List.Count(sorted) > 0 then sorted{0}[name] else ""
+        in
+            latest,
+        type text
+    ),
+
+    // 10. Remove original SprintList column
+    RemovedSprintList = Table.RemoveColumns(WithSprint, {"SprintList"}),
+
+    // 11. Rename FixVersionsRec and select final columns
+    Renamed = Table.RenameColumns(RemovedSprintList, {{"FixVersionsRec","Fix Versions"}}),
+    Final = Table.SelectColumns(Renamed, {
+        "Jira Id",
+        "Issue Internal Id",
+        "Issue Type",
+        "Summary",
+        "Priority",
+        "Status",
+        "Fix Versions",
+        "Sprint",
+        "Assignee",
+        "CreatedDate"
+    })
 in
-    #"Reordered Columns"
+    Final
