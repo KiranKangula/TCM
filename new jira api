@@ -1,10 +1,10 @@
 let
-    // 1. Read base URL from named range (without pagination parameters)
+    // 1. Read base URL from named range
     RawUrl       = Excel.CurrentWorkbook(){[Name="BaseUrl"]}[Content]{0}[Column1],
 
     // 2. Credentials
     JiraEmail    = "kiran_kangula@wsib.on.ca",
-    JiraToken    = "ATATT3xFfGF0lgqnDBbV-E4N-PilxvcHe-LfchouSDoeM-AdYpILGnK2sbRusGEhQnl7h8Rc8X1yNOJ5a8vLH7g2vsEJ0TgeYoUrSIasha6EGx9Iw7t7MmnPj7OTgwetJRQp-Ke2vAdKaPt9ulUTMaGlXV_BbxK_7SkwfQ_wpSqVjxU9iGbNYkE=2E4D6E84",
+    JiraToken    = "ATATT3xFfGF0SOuiaeL9OieMi5KVLgVnuRpz69ADWfFhI7CiLCeOaCWg0K4I-pxPnJNqNwutzk488J47SL6FiaV4coYzVzb5hLzfcntBnEn-wTCEPvSAUHiMYDB5l8aS2e2wiIOZo3JCPDhz-19INw0LZSt0kHKgfRf2FoIOUtTLAKRnE9NtKD8=3CC081D6",
     AuthKey      = "Basic " & Binary.ToText(Text.ToBinary(JiraEmail & ":" & JiraToken), BinaryEncoding.Base64),
     Headers      = [ Authorization = AuthKey, Accept = "application/json" ],
 
@@ -16,16 +16,25 @@ let
         in
             Response,
 
-    // 4. Generate list of pages
+    // 4. Fixed pagination logic - properly handle termination
     Pages = List.Generate(
-        ()=> [Page = GetPage(null)],
-        each [Page][issues] <> null and List.Count([Page][issues]) > 0,
-        each [Page = if [Page][isLast] = false then GetPage([Page][nextPageToken]) else null],
-        each [Page]
+        ()=> [
+            CurrentPage = GetPage(null), 
+            Continue = true
+        ],
+        each [Continue],
+        each [
+            NextToken = try [CurrentPage][nextPageToken] otherwise null,
+            IsLast = try [CurrentPage][isLast] otherwise true,
+            CurrentPage = if IsLast = false and NextToken <> null then GetPage(NextToken) else null,
+            Continue = CurrentPage <> null
+        ],
+        each [CurrentPage]
     ),
 
-    // 5. Combine all issues
-    AllIssues = List.Combine(List.Transform(Pages, each [issues])),
+    // 5. Remove nulls and combine issues
+    ValidPages = List.RemoveNulls(Pages),
+    AllIssues = List.Combine(List.Transform(ValidPages, each [issues])),
 
     // 6. Convert to table and expand
     IssueTbl    = Table.FromList(AllIssues, Splitter.SplitByNothing(), {"Issue"}),
