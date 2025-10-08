@@ -1,96 +1,75 @@
 let
-    // 1. Read the base URL from Excel named range and ensure maxResults=1000
-    BaseUrlTable = Excel.CurrentWorkbook(){[Name="BaseUrl"]}[Content],
-    RawUrl      = BaseUrlTable{0}[Column1],
-    // If the URL already has maxResults, replace it; otherwise append maxResults=1000
-    BaseUrl     = if Text.Contains(RawUrl, "maxResults=") 
-                  then Text.Replace(RawUrl, "maxResults=" & Text.Middle(RawUrl, Text.PositionOf(RawUrl, "maxResults=") + 11, 3), "maxResults=200")
-                  else RawUrl & "&maxResults=200"
-                  & "&orderBy=key ASC",
+    // 1. Read base URL from named range (without pagination parameters)
+    RawUrl       = Excel.CurrentWorkbook(){[Name="BaseUrl"]}[Content]{0}[Column1],
 
-    // 2. Jira credentials
+    // 2. Credentials
     JiraEmail    = "kiran_kangula@wsib.on.ca",
-    JiraAPIToken = "ATATT3xFfGF0l4Ia0FIYVr8VC-JA8nIrP9SbUEpIRrH76MON2wzYEaWeqSU4dw2GLHoOSYRaNIq1z8aWJVucXZl3PcqopMimIbc5yFVYs-0UW6sE1tcpWs8dPJ_FXD4yColnUJ2M10us-ngRgnoiZRbvSTbePPFs2mdg4MGcmSwGB1uCMuD52jA=58DAD87F",
-    AuthKey      = Binary.ToText(Text.ToBinary(JiraEmail & ":" & JiraAPIToken), BinaryEncoding.Base64),
-    Headers      = [
-        #"Authorization" = "Basic " & AuthKey,
-        #"Accept"        = "application/json"
-    ],
+    JiraToken    = "ATATT3xFfGF0lgqnDBbV-E4N-PilxvcHe-LfchouSDoeM-AdYpILGnK2sbRusGEhQnl7h8Rc8X1yNOJ5a8vLH7g2vsEJ0TgeYoUrSIasha6EGx9Iw7t7MmnPj7OTgwetJRQp-Ke2vAdKaPt9ulUTMaGlXV_BbxK_7SkwfQ_wpSqVjxU9iGbNYkE=2E4D6E84",
+    AuthKey      = "Basic " & Binary.ToText(Text.ToBinary(JiraEmail & ":" & JiraToken), BinaryEncoding.Base64),
+    Headers      = [ Authorization = AuthKey, Accept = "application/json" ],
 
-    // 3. Pagination function using v3 API structure
-    GetPage = (Token as nullable text) =>
+    // 3. Pagination function using v3 nextPageToken/isLast
+    GetPage = (token as nullable text) =>
         let
-            Url      = if Token = null then BaseUrl else BaseUrl & "&nextPageToken=" & Uri.EscapeDataString(Token),
-            Response = Json.Document(
-                Web.Contents(Url, [
-                    Headers = Headers,
-                    Timeout = #duration(0, 0, 5, 0)  // 5-minute timeout
-                ])
-            )
+            Url      = if token = null then RawUrl else RawUrl & "&nextPageToken=" & Uri.EscapeDataString(token),
+            Response = Json.Document(Web.Contents(Url, [Headers=Headers, Timeout=#duration(0,0,5,0)]))
         in
             Response,
 
-    // 4. Retrieve all pages
-    AllPages = List.Generate(
-        () => [Resp = GetPage(null), Continue = true],
-        each [Continue],
-        each [
-            NextToken = try [Resp][nextPageToken] otherwise null,
-            IsLast    = try [Resp][isLast] otherwise true,
-            Resp      = if IsLast = false and NextToken <> null then GetPage(NextToken) else null,
-            Continue  = Resp <> null
-        ],
-        each [Resp]
+    // 4. Generate list of pages
+    Pages = List.Generate(
+        ()=> [Page = GetPage(null)],
+        each [Page][issues] <> null and List.Count([Page][issues]) > 0,
+        each [Page = if [Page][isLast] = false then GetPage([Page][nextPageToken]) else null],
+        each [Page]
     ),
 
     // 5. Combine all issues
-    AllIssues = List.Combine(List.Transform(List.RemoveNulls(AllPages), each [issues])),
+    AllIssues = List.Combine(List.Transform(Pages, each [issues])),
 
-    // 6. Convert to table and expand core records
-    IssuesTable = Table.FromList(AllIssues, Splitter.SplitByNothing(), {"Record"}),
-    Expanded1   = Table.ExpandRecordColumn(IssuesTable, "Record", {"key","id","fields"}),
-    Fields1     = Table.ExpandRecordColumn(Expanded1, "fields",
-        {"issuetype","summary","priority","status","fixVersions","assignee","created","customfield_10020"},
-        {"issuetype","summary","priority","status","fixVersions","assignee","created","Sprint"}
-    ),
+    // 6. Convert to table and expand
+    IssueTbl    = Table.FromList(AllIssues, Splitter.SplitByNothing(), {"Issue"}),
+    Exp1        = Table.ExpandRecordColumn(IssueTbl, "Issue", {"key","id","fields"}, {"Jira Id","Issue Internal Id","Fields"}),
+    Exp2        = Table.ExpandRecordColumn(Exp1, "Fields",
+                      {"issuetype","summary","priority","status","fixVersions","assignee","created","customfield_10020"},
+                      {"IssueTypeRec","Summary","PriorityRec","StatusRec","FixVersionsRec","AssigneeRec","CreatedDate","SprintRec"}),
 
-    // 7. Expand single-value fields
-    Ex1 = Table.ExpandRecordColumn(Fields1, "issuetype", {"name"}, {"Issue Type"}),
-    Ex2 = Table.ExpandRecordColumn(Ex1, "priority", {"name"}, {"Priority"}),
-    Ex3 = Table.ExpandRecordColumn(Ex2, "status", {"name"}, {"Status"}),
-    Ex4 = Table.ExpandRecordColumn(Ex3, "assignee", {"displayName"}, {"Assignee"}),
+    // 7. Expand single-value nested records
+    ExpType     = Table.ExpandRecordColumn(Exp2, "IssueTypeRec", {"name"}, {"Issue Type"}),
+    ExpPrio     = Table.ExpandRecordColumn(ExpType, "PriorityRec", {"name"}, {"Priority"}),
+    ExpStat     = Table.ExpandRecordColumn(ExpPrio, "StatusRec",   {"name"}, {"Status"}),
+    ExpAsgn     = Table.ExpandRecordColumn(ExpStat, "AssigneeRec", {"displayName"}, {"Assignee"}),
 
-    // 8. Handle multi-value lists by concatenating
-    WithFixVersions = Table.TransformColumns(Ex4, {
-        "fixVersions",
-        each if _ = null or List.Count(_) = 0 then "" else Text.Combine(List.Transform(_, each [name]), ", "),
-        type text
-    }),
-    WithSprints = Table.TransformColumns(WithFixVersions, {
-        "Sprint",
-        each if _ = null or List.Count(_) = 0 then "" else Text.Combine(List.Transform(_, each [name]), ", "),
-        type text
-    }),
+    // 8. Convert lists to comma-separated text
+    WithFix     = Table.TransformColumns(ExpAsgn, {
+                    "FixVersionsRec",
+                    each if _ = null or List.Count(_) = 0 then "" else Text.Combine(List.Transform(_, each [name]), ", "),
+                    type text
+                 }),
+    WithSprint  = Table.TransformColumns(WithFix, {
+                    "SprintRec",
+                    each if _ = null or List.Count(_) = 0 then "" else Text.Combine(List.Transform(_, each [name]), ", "),
+                    type text
+                 }),
 
-    // 9. Rename and select final columns
-    Renamed = Table.RenameColumns(WithSprints, {
-        {"key", "Jira Id"},
-        {"id", "Issue Internal Id"},
-        {"summary", "Summary"},
-        {"created", "CreatedDate"},
-        {"fixVersions", "Fix Versions"}
-    }),
-    Final = Table.SelectColumns(Renamed, {
-        "Jira Id",
-        "Issue Internal Id",
-        "Issue Type",
-        "Summary",
-        "Priority",
-        "Status",
-        "Fix Versions",
-        "Sprint",
-        "Assignee",
-        "CreatedDate"
-    })
+    // 9. Rename and select columns
+    Renamed     = Table.RenameColumns(WithSprint, {
+                    {"FixVersionsRec","Fix Versions"},
+                    {"SprintRec","Sprint"}
+                 }),
+    Final       = Table.SelectColumns(Renamed, {
+                    "Jira Id",
+                    "Issue Internal Id",
+                    "Issue Type",
+                    "Summary",
+                    "Priority",
+                    "Status",
+                    "Fix Versions",
+                    "Sprint",
+                    "Assignee",
+                    "CreatedDate"
+                 }),
+    #"Removed Columns" = Table.RemoveColumns(Final,{"Issue Internal Id"}),
+    #"Reordered Columns" = Table.ReorderColumns(#"Removed Columns",{"Jira Id", "Issue Type", "Summary", "Priority", "Status", "Fix Versions", "Assignee", "CreatedDate", "Sprint"})
 in
-    Final
+    #"Reordered Columns"
